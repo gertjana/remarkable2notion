@@ -1,0 +1,19 @@
+/target
+.env
+*.pdf
+*.txt
+.DS_Store
+.venv/
+
+# Secrets and credentials
+scripts/credentials.json
+scripts/token.pickle
+google_token.json
+*.key
+*.pem
+*.p12
+
+# backups created by this tool
+remarkable_backup/
+ai_reports/
+
