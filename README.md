@@ -5,8 +5,8 @@ A Rust CLI tool that syncs reMarkable notebooks to Notion with OCR text extracti
 ## Quick Start
 
 1. **Install prerequisites** - See [SETUP.md](SETUP.md) for detailed instructions
-2. **Connect reMarkable via USB** and run RemarkableSync
-3. **Configure** - Create `.env` file with your API credentials
+2. **Configure** - Create `.env` file with your API credentials
+3. **Connect reMarkable via USB**
 4. **Run** - `cargo run --release -- sync`
 
 For complete setup instructions, see **[SETUP.md](SETUP.md)**
@@ -22,21 +22,12 @@ For complete setup instructions, see **[SETUP.md](SETUP.md)**
 
 See [SETUP.md](SETUP.md) for detailed setup steps.
 
-## Installation
-
-```bash
-git clone <repository-url>
-cd remarkable2notion
-cargo build --release
-```
-
 ## Usage
 
 ### Initial Setup
 
 1. **Connect reMarkable via USB** - Ensure tablet is awake
-2. **Run RemarkableSync** to create backup in `~/remarkable_backup`
-3. **First sync** - Run the tool:
+2. **First sync** - Run the tool:
 
 ```bash
 cargo run --release -- sync
