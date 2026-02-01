@@ -1,17 +1,6 @@
 # ReMarkable to Notion Sync
 
-A pure Rust CLI tool that syncs reMarkable notebooks to Notion with OCR text extraction and full-resolution images.
-
-## Features
-
-- 🔌 **USB Sync** - Direct connection to reMarkable (no cloud dependency)
-- 🖼️ **Full-Quality Images** - Complete page images embedded in Notion
-- 🔍 **OCR** - Google Cloud Vision API for handwriting recognition
-- 🏷️ **Tag Sync** - ReMarkable tags synced to Notion multi-select property
-- 📝 **Smart Updates** - Automatically updates existing Notion pages
-- 📎 **PDF Backups** - Stores PDFs on Google Drive
-- ✨ **Pure Rust** - Single binary, zero dependencies
-- 🔐 **Automatic OAuth** - Browser-based auth with token refresh
+A Rust CLI tool that syncs reMarkable notebooks to Notion with OCR text extraction and full-resolution images.
 
 ## Quick Start
 
@@ -24,7 +13,8 @@ For complete setup instructions, see **[SETUP.md](SETUP.md)**
 
 ## Prerequisites
 
-- **ReMarkable tablet** with USB sync (RemarkableSync or rmapi)
+- **ReMarkable tablet** in developer mode
+- RemarkableSync to make a local backup
 - **Rust** 1.70+ (`cargo --version`)
 - **Google Cloud account** (Vision API + Drive API)
 - **Notion workspace** with integration token
@@ -113,24 +103,9 @@ The sync process:
 
 See [SETUP.md](SETUP.md) for common issues and solutions.
 
-## Project Structure
-
-```
-src/
-├── main.rs              # CLI entry point
-├── oauth.rs             # Google OAuth 2.0 (browser-based)
-├── rmapi/               # ReMarkable sync and tag extraction
-│   └── mod.rs          # PDF extraction, tag parsing
-├── google_vision.rs     # OCR client
-├── google_drive.rs      # PDF storage
-├── notion/              # Notion API (file upload + pages)
-└── sync/                # Orchestration
-```
-
 ## Documentation
-
+ssss
 - **[SETUP.md](SETUP.md)** - Complete setup guide
-- **[ai_reports/](ai_reports/)** - Technical implementation details
 
 ## License
 
