@@ -91,21 +91,17 @@ LOG_LEVEL=trace cargo run --release -- sync
 
 The sync process:
 
-1. **USB Sync**: RemarkableSync extracts PDFs from reMarkable
+1. **USB Sync**: RemarkableSync extracts Notebooks and Quicksheets from reMarkable
 2. **Tag Extraction**: Reads tags from `.content` files in backup
-3. **Image Conversion**: pdftoppm converts PDF pages to PNG
+3. **Image Conversion**: pdftoppm converts content pages to PNG
 4. **OCR**: Google Cloud Vision extracts handwritten text
-5. **Notion Upload**: Images uploaded directly to Notion pages
-6. **PDF Backup**: Complete PDFs stored in Google Drive
-7. **Tag Sync**: ReMarkable tags synced to Notion multi-select property
+5. **Notion Upload**: Images uploaded directly to Notion
+6. **PDF Backup**: Complete PDFs stored in Google Drive with the link in Notion
+7. **Tag Sync**: Tags synced to Notion
 
 ## Troubleshooting
 
 See [SETUP.md](SETUP.md) for common issues and solutions.
-
-## Documentation
-ssss
-- **[SETUP.md](SETUP.md)** - Complete setup guide
 
 ## License
 
