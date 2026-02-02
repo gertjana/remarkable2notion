@@ -182,13 +182,13 @@ impl RemarkableClient {
                 };
 
                 // O(1) lookup from pre-built index
-                let metadata = metadata_index.get(&name);
-                let (created_time, modified_time, tags, is_deleted) = if let Some(meta) = metadata {
-                    (meta.created_time.clone(), meta.modified_time.clone(), meta.tags.clone(), meta.is_deleted)
-                } else {
-                    debug!("No metadata found for {}", name);
-                    (None, None, Vec::new(), false)
-                };
+                let (created_time, modified_time, tags, is_deleted) = 
+                    if let Some(meta) = metadata_index.get(&name) {
+                        (meta.created_time.clone(), meta.modified_time.clone(), meta.tags.clone(), meta.is_deleted)
+                    } else {
+                        debug!("No metadata found for {}", name);
+                        (None, None, Vec::new(), false)
+                    };
 
                 notebooks.push(Notebook {
                     name,
