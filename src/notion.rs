@@ -369,18 +369,19 @@ impl NotionClient {
         }
 
         // Always update folder (even if empty, to clear old folder when moved to root)
+        let folder_rich_text = if metadata.folder_path.is_empty() {
+            vec![]
+        } else {
+            vec![
+                json!({
+                    "text": {
+                        "content": metadata.folder_path
+                    }
+                })
+            ]
+        };
         properties["Folder"] = json!({
-            "rich_text": if metadata.folder_path.is_empty() {
-                vec![]
-            } else {
-                vec![
-                    json!({
-                        "text": {
-                            "content": metadata.folder_path
-                        }
-                    })
-                ]
-            }
+            "rich_text": folder_rich_text
         });
 
         // Update creation date if available
