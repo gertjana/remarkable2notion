@@ -96,6 +96,11 @@ impl SyncEngine {
         let mut error_count = 0;
 
         for (idx, notebook) in notebooks.iter().enumerate() {
+            // Skip deleted notebooks, they'll be handled separately
+            if notebook.is_deleted {
+                continue;
+            }
+
             debug!("Processing {}/{}: {}", idx + 1, notebooks.len(), notebook.name);
 
             match self.process_notebook(notebook).await {
@@ -110,9 +115,76 @@ impl SyncEngine {
             }
         }
 
+        // Delete notebooks from Notion that are deleted on the tablet (parent="trash")
+        let mut deleted_count = 0;
+        for notebook in &notebooks {
+            if notebook.is_deleted {
+                debug!("Notebook '{}' is in trash, deleting from Notion", notebook.name);
+                match self.notion.find_page_by_title(&notebook.name).await {
+                    Ok(Some(page)) => {
+                        if let Err(e) = self.notion.delete_page(&page.id).await {
+                            warn!("Failed to delete '{}': {}", notebook.name, e);
+                        } else {
+                            deleted_count += 1;
+                            info!("🗑️  {}", notebook.name);
+                        }
+                    }
+                    Ok(None) => {
+                        debug!(
+                            "No Notion page found for deleted notebook '{}', skipping delete",
+                            notebook.name
+                        );
+                    }
+                    Err(e) => {
+                        warn!("Failed to check if page exists for deleted notebook '{}': {}", notebook.name, e);
+                    }
+                }
+            }
+        }
+
+        // Fetch all pages from Notion using a paginated API to ensure we see
+        // pages beyond the first page of results.
+        let all_pages = match self.notion.get_all_pages().await {
+            Ok(pages) => pages,
+            Err(e) => {
+                warn!(
+                    "Failed to list pages from Notion for delete-sync: {}. Skipping delete step.",
+                    e
+                );
+                Vec::new()
+            }
+        };
+
+        for notebook in &notebooks {
+            if notebook.is_deleted {
+                debug!(
+                    "Notebook '{}' is in trash, attempting to delete from Notion",
+                    notebook.name
+                );
+
+                // Find the corresponding page by title among all pages.
+                if let Some(page) = all_pages
+                    .iter()
+                    .find(|page| page.title == notebook.name)
+                {
+                    if let Err(e) = self.notion.delete_page(&page.id).await {
+                        warn!("Failed to delete '{}': {}", notebook.name, e);
+                    } else {
+                        deleted_count += 1;
+                        info!("🗑️  {}", notebook.name);
+                    }
+                } else {
+                    debug!(
+                        "No Notion page found with title '{}' for deletion",
+                        notebook.name
+                    );
+                }
+            }
+        }
+
         info!(
-            "Complete: {} succeeded, {} failed",
-            success_count, error_count
+            "Complete: {} succeeded, {} failed, {} deleted",
+            success_count, error_count, deleted_count
         );
 
         Ok(())
@@ -151,7 +223,7 @@ impl SyncEngine {
         match existing_page {
             Some(page) => {
                 debug!("Updating existing page: {}", notebook.name);
-                self.notion.update_page(&page.id, &text_content, &notebook.tags).await?;
+                self.notion.update_page(&page.id, &text_content, &notebook.metadata, &notebook.tags).await?;
 
                 // Add images if available (upload directly to Notion)
                 if !image_paths.is_empty() {

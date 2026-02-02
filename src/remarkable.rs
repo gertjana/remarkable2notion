@@ -1,6 +1,7 @@
 use crate::error::{Error, Result};
 use crate::notion::NotebookMetadata;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, info};
@@ -13,6 +14,7 @@ pub struct Notebook {
     pub id: String,
     pub metadata: NotebookMetadata,
     pub tags: Vec<String>,
+    pub is_deleted: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -32,6 +34,20 @@ struct ContentFile {
 struct MetadataFile {
     #[serde(rename = "visibleName")]
     visible_name: String,
+    parent: Option<String>,
+    #[serde(rename = "createdTime")]
+    created_time: Option<String>,
+    #[serde(rename = "lastModified")]
+    last_modified: Option<String>,
+}
+
+/// Indexed metadata for O(1) lookups by notebook name
+#[derive(Debug, Clone)]
+struct IndexedMetadata {
+    created_time: Option<String>,
+    modified_time: Option<String>,
+    tags: Vec<String>,
+    is_deleted: bool,
 }
 
 pub struct RemarkableClient {
@@ -122,8 +138,12 @@ impl RemarkableClient {
             return Ok(Vec::new());
         }
 
+        // Pre-index all metadata and content files for O(1) lookups
+        let metadata_index = self.build_metadata_index()?;
+        debug!("Built metadata index with {} entries", metadata_index.len());
+
         let mut notebooks = Vec::new();
-        self.scan_pdfs_recursive(&pdfs_dir, "", &mut notebooks)?;
+        self.scan_pdfs_recursive(&pdfs_dir, "", &mut notebooks, &metadata_index)?;
 
         debug!("Found {} notebooks", notebooks.len());
         Ok(notebooks)
@@ -134,6 +154,7 @@ impl RemarkableClient {
         dir: &Path,
         relative_path: &str,
         notebooks: &mut Vec<Notebook>,
+        metadata_index: &HashMap<String, IndexedMetadata>,
     ) -> Result<()> {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
@@ -146,7 +167,7 @@ impl RemarkableClient {
                 } else {
                     format!("{}/{}", relative_path, folder_name)
                 };
-                self.scan_pdfs_recursive(&path, &new_path, notebooks)?;
+                self.scan_pdfs_recursive(&path, &new_path, notebooks, metadata_index)?;
             } else if path.extension().and_then(|s| s.to_str()) == Some("pdf") {
                 let name = path
                     .file_stem()
@@ -160,15 +181,14 @@ impl RemarkableClient {
                     format!("{}/{}", relative_path, name)
                 };
 
-                // Get metadata from PDF file
-                let metadata = std::fs::metadata(&path)?;
-                let modified_time = metadata.modified().ok()
-                    .and_then(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339_opts(chrono::SecondsFormat::Secs, true).into());
-                let created_time = metadata.created().ok()
-                    .and_then(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339_opts(chrono::SecondsFormat::Secs, true).into());
-
-                // Try to read tags from the corresponding .content file
-                let tags = self.read_tags_from_content(&name).unwrap_or_default();
+                // O(1) lookup from pre-built index
+                let (created_time, modified_time, tags, is_deleted) = 
+                    if let Some(meta) = metadata_index.get(&name) {
+                        (meta.created_time.clone(), meta.modified_time.clone(), meta.tags.clone(), meta.is_deleted)
+                    } else {
+                        debug!("No metadata found for {}", name);
+                        (None, None, Vec::new(), false)
+                    };
 
                 notebooks.push(Notebook {
                     name,
@@ -180,6 +200,7 @@ impl RemarkableClient {
                         folder_path: relative_path.to_string(),
                     },
                     tags,
+                    is_deleted,
                 });
             }
         }
@@ -187,17 +208,19 @@ impl RemarkableClient {
         Ok(())
     }
 
-    fn read_tags_from_content(&self, notebook_name: &str) -> Result<Vec<String>> {
-        // The .content and .metadata files are in the Notebooks directory
-        // They're named with UUIDs, so we need to:
-        // 1. Find the .metadata file with matching visibleName
-        // 2. Use the same UUID to read the .content file
+    /// Build a HashMap index of all metadata for O(1) lookups by notebook name
+    fn build_metadata_index(&self) -> Result<HashMap<String, IndexedMetadata>> {
         let notebooks_dir = self.backup_dir.join("Notebooks");
+        let mut index = HashMap::new();
 
-        debug!("Looking for tags for notebook: {}", notebook_name);
+        if !notebooks_dir.exists() {
+            debug!("No Notebooks directory found");
+            return Ok(index);
+        }
 
-        // First pass: find the UUID by matching notebook name in .metadata files
-        let mut uuid = None;
+        debug!("Building metadata index from Notebooks directory");
+
+        // Scan all .metadata files once
         for entry in std::fs::read_dir(&notebooks_dir)? {
             let entry = entry?;
             let path = entry.path();
@@ -205,40 +228,62 @@ impl RemarkableClient {
             if path.extension().and_then(|s| s.to_str()) == Some("metadata") {
                 if let Ok(metadata_content) = std::fs::read_to_string(&path) {
                     if let Ok(metadata) = serde_json::from_str::<MetadataFile>(&metadata_content) {
-                        if metadata.visible_name == notebook_name {
-                            // Extract UUID from filename (remove .metadata extension)
-                            uuid = path.file_stem()
-                                .and_then(|s| s.to_str())
-                                .map(|s| s.to_string());
-                            debug!("Found UUID {} for notebook {}", uuid.as_ref().unwrap(), notebook_name);
-                            break;
+                        // Check if notebook is in trash
+                        let is_deleted = metadata.parent.as_ref().map(|p| p == "trash").unwrap_or(false);
+
+                        // Extract UUID from filename (remove .metadata extension)
+                        let uuid = path.file_stem()
+                            .and_then(|s| s.to_str())
+                            .map(|s| s.to_string());
+
+                        // Convert timestamps from milliseconds to RFC3339
+                        let created_time = metadata.created_time.and_then(|ts| {
+                            ts.parse::<i64>().ok().and_then(|millis| {
+                                chrono::DateTime::from_timestamp_millis(millis)
+                                    .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+                            })
+                        });
+
+                        let modified_time = metadata.last_modified.and_then(|ts| {
+                            ts.parse::<i64>().ok().and_then(|millis| {
+                                chrono::DateTime::from_timestamp_millis(millis)
+                                    .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+                            })
+                        });
+
+                        // Read tags from .content file with matching UUID
+                        let mut tags = Vec::new();
+                        if let Some(ref uuid_str) = uuid {
+                            let content_path = notebooks_dir.join(format!("{}.content", uuid_str));
+                            if content_path.exists() {
+                                if let Ok(content) = std::fs::read_to_string(&content_path) {
+                                    if let Ok(content_data) = serde_json::from_str::<ContentFile>(&content) {
+                                        tags = content_data.tags
+                                            .iter()
+                                            .map(|tag| tag.name.clone())
+                                            .collect();
+                                    }
+                                }
+                            }
                         }
+
+                        // Store in index by visibleName
+                        index.insert(
+                            metadata.visible_name.clone(),
+                            IndexedMetadata {
+                                created_time,
+                                modified_time,
+                                tags,
+                                is_deleted,
+                            }
+                        );
                     }
                 }
             }
         }
 
-        // Second pass: read tags from .content file with matching UUID
-        if let Some(uuid) = uuid {
-            let content_path = notebooks_dir.join(format!("{}.content", uuid));
-            if content_path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&content_path) {
-                    if let Ok(content_data) = serde_json::from_str::<ContentFile>(&content) {
-                        if !content_data.tags.is_empty() {
-                            let tag_names: Vec<String> = content_data.tags
-                                .iter()
-                                .map(|tag| tag.name.clone())
-                                .collect();
-                            debug!("Found {} tags for {}: {:?}", tag_names.len(), notebook_name, tag_names);
-                            return Ok(tag_names);
-                        }
-                    }
-                }
-            }
-        }
-
-        debug!("No tags found for {}", notebook_name);
-        Ok(Vec::new())
+        debug!("Indexed {} notebooks", index.len());
+        Ok(index)
     }
 
     pub async fn download_notebook(&self, notebook: &Notebook, output_dir: &Path) -> Result<PathBuf> {
