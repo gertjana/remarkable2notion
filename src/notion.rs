@@ -100,6 +100,9 @@ impl NotionClient {
                         "options": []
                     }
                 },
+                "Folder": {
+                    "rich_text": {}
+                },
                 "Created": {
                     "date": {}
                 },
@@ -259,6 +262,19 @@ impl NotionClient {
             });
         }
 
+        // Add folder if available (empty string for root level)
+        if !metadata.folder_path.is_empty() {
+            properties["Folder"] = json!({
+                "rich_text": [
+                    {
+                        "text": {
+                            "content": metadata.folder_path
+                        }
+                    }
+                ]
+            });
+        }
+
         let create_body = json!({
             "parent": {
                 "database_id": self.database_id
@@ -331,27 +347,67 @@ impl NotionClient {
         })
     }
 
-    pub async fn update_page(&self, page_id: &str, content: &str, tags: &[String]) -> Result<()> {
+    pub async fn update_page(&self, page_id: &str, content: &str, metadata: &NotebookMetadata, tags: &[String]) -> Result<()> {
         debug!("Updating Notion page: {}", page_id);
 
-        // Update tags if provided
+        // Update properties (tags and folder)
+        let mut properties = json!({});
+
+        // Always update tags (even if empty, to clear old tags)
         if !tags.is_empty() {
             debug!("Updating {} tags: {:?}", tags.len(), tags);
-            let update_props = json!({
-                "properties": {
-                    "Tags": {
-                        "multi_select": tags.iter().map(|tag| json!({"name": tag})).collect::<Vec<_>>()
+            properties["Tags"] = json!({
+                "multi_select": tags.iter().map(|tag| json!({"name": tag})).collect::<Vec<_>>()
+            });
+        } else {
+            debug!("Clearing tags");
+            properties["Tags"] = json!({
+                "multi_select": []
+            });
+        }
+
+        // Update folder if available
+        if !metadata.folder_path.is_empty() {
+            properties["Folder"] = json!({
+                "rich_text": [
+                    {
+                        "text": {
+                            "content": metadata.folder_path
+                        }
                     }
+                ]
+            });
+        }
+
+        // Update creation date if available
+        if let Some(ref created) = metadata.created_time {
+            properties["Created"] = json!({
+                "date": {
+                    "start": created
                 }
             });
-
-            self.client
-                .patch(format!("{}/pages/{}", NOTION_API_BASE, page_id))
-                .headers(self.headers())
-                .json(&update_props)
-                .send()
-                .await?;
         }
+
+        // Update last modified date if available
+        if let Some(ref modified) = metadata.modified_time {
+            properties["Last Modified"] = json!({
+                "date": {
+                    "start": modified
+                }
+            });
+        }
+
+        // Send the property updates
+        let update_props = json!({
+            "properties": properties
+        });
+
+        self.client
+            .patch(format!("{}/pages/{}", NOTION_API_BASE, page_id))
+            .headers(self.headers())
+            .json(&update_props)
+            .send()
+            .await?;
 
         let children_response = self
             .client
@@ -689,5 +745,99 @@ impl NotionClient {
         debug!("File uploaded successfully: {}", file_id);
 
         Ok(file_id)
+    }
+
+    pub async fn get_all_pages(&self) -> Result<Vec<NotionPage>> {
+        debug!("Querying all pages from database");
+
+        let mut all_pages = Vec::new();
+        let mut has_more = true;
+        let mut start_cursor: Option<String> = None;
+
+        while has_more {
+            let mut query_body = json!({
+                "page_size": 100
+            });
+
+            if let Some(ref cursor) = start_cursor {
+                query_body["start_cursor"] = json!(cursor);
+            }
+
+            let response = self
+                .client
+                .post(format!(
+                    "{}/databases/{}/query",
+                    NOTION_API_BASE, self.database_id
+                ))
+                .headers(self.headers())
+                .json(&query_body)
+                .send()
+                .await?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body = response.text().await?;
+                return Err(Error::Notion(format!("Query failed: {} - {}", status, body)));
+            }
+
+            let query_result: serde_json::Value = response.json().await?;
+
+            has_more = query_result.get("has_more").and_then(|v| v.as_bool()).unwrap_or(false);
+            start_cursor = query_result.get("next_cursor").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+            if let Some(results) = query_result.get("results").and_then(|r| r.as_array()) {
+                for page in results {
+                    if let Some(page_id) = page.get("id").and_then(|id| id.as_str()) {
+                        if let Some(props) = page.get("properties").and_then(|p| p.as_object()) {
+                            // Look through all properties to find title type
+                            for (_key, value) in props.iter() {
+                                if let Some(prop_type) = value.get("type") {
+                                    if prop_type == "title" {
+                                        if let Some(title_array) = value.get("title").and_then(|t| t.as_array()) {
+                                            if let Some(first_title) = title_array.first() {
+                                                if let Some(text_content) = first_title.get("plain_text").and_then(|t| t.as_str()) {
+                                                    all_pages.push(NotionPage {
+                                                        id: page_id.to_string(),
+                                                        title: text_content.to_string(),
+                                                    });
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        debug!("Found {} total pages", all_pages.len());
+        Ok(all_pages)
+    }
+
+    pub async fn delete_page(&self, page_id: &str) -> Result<()> {
+        debug!("Deleting page: {}", page_id);
+
+        let update_props = json!({
+            "archived": true
+        });
+
+        let response = self.client
+            .patch(format!("{}/pages/{}", NOTION_API_BASE, page_id))
+            .headers(self.headers())
+            .json(&update_props)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await?;
+            return Err(Error::Notion(format!("Failed to delete page: {} - {}", status, body)));
+        }
+
+        debug!("Page deleted");
+        Ok(())
     }
 }

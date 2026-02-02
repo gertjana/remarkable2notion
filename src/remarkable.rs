@@ -13,6 +13,7 @@ pub struct Notebook {
     pub id: String,
     pub metadata: NotebookMetadata,
     pub tags: Vec<String>,
+    pub is_deleted: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -32,6 +33,11 @@ struct ContentFile {
 struct MetadataFile {
     #[serde(rename = "visibleName")]
     visible_name: String,
+    parent: Option<String>,
+    #[serde(rename = "createdTime")]
+    created_time: Option<String>,
+    #[serde(rename = "lastModified")]
+    last_modified: Option<String>,
 }
 
 pub struct RemarkableClient {
@@ -160,15 +166,8 @@ impl RemarkableClient {
                     format!("{}/{}", relative_path, name)
                 };
 
-                // Get metadata from PDF file
-                let metadata = std::fs::metadata(&path)?;
-                let modified_time = metadata.modified().ok()
-                    .and_then(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339_opts(chrono::SecondsFormat::Secs, true).into());
-                let created_time = metadata.created().ok()
-                    .and_then(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339_opts(chrono::SecondsFormat::Secs, true).into());
-
-                // Try to read tags from the corresponding .content file
-                let tags = self.read_tags_from_content(&name).unwrap_or_default();
+                // Read timestamps, tags, and deleted status from the .metadata and .content files
+                let (created_time, modified_time, tags, is_deleted) = self.read_metadata_and_tags(&name)?;
 
                 notebooks.push(Notebook {
                     name,
@@ -180,11 +179,90 @@ impl RemarkableClient {
                         folder_path: relative_path.to_string(),
                     },
                     tags,
+                    is_deleted,
                 });
             }
         }
 
         Ok(())
+    }
+
+    fn read_metadata_and_tags(&self, notebook_name: &str) -> Result<(Option<String>, Option<String>, Vec<String>, bool)> {
+        // The .content and .metadata files are in the Notebooks directory
+        // They're named with UUIDs, so we need to:
+        // 1. Find the .metadata file with matching visibleName
+        // 2. Use the same UUID to read the .content file for tags
+        // 3. Read timestamps from the .metadata file
+        // 4. Check if parent is "trash" to mark as deleted
+        let notebooks_dir = self.backup_dir.join("Notebooks");
+
+        debug!("Looking for metadata and tags for notebook: {}", notebook_name);
+
+        // Find the UUID by matching notebook name in .metadata files
+        for entry in std::fs::read_dir(&notebooks_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.extension().and_then(|s| s.to_str()) == Some("metadata") {
+                if let Ok(metadata_content) = std::fs::read_to_string(&path) {
+                    if let Ok(metadata) = serde_json::from_str::<MetadataFile>(&metadata_content) {
+                        if metadata.visible_name == notebook_name {
+                            // Check if notebook is in trash
+                            let is_deleted = metadata.parent.as_ref().map(|p| p == "trash").unwrap_or(false);
+                            if is_deleted {
+                                debug!("Notebook '{}' is in trash", notebook_name);
+                            }
+
+                            // Extract UUID from filename (remove .metadata extension)
+                            let uuid = path.file_stem()
+                                .and_then(|s| s.to_str())
+                                .map(|s| s.to_string());
+
+                            debug!("Found UUID {:?} for notebook {}", uuid, notebook_name);
+
+                            // Convert timestamps from milliseconds to RFC3339
+                            let created_time = metadata.created_time.and_then(|ts| {
+                                ts.parse::<i64>().ok().and_then(|millis| {
+                                    chrono::DateTime::from_timestamp_millis(millis)
+                                        .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+                                })
+                            });
+
+                            let modified_time = metadata.last_modified.and_then(|ts| {
+                                ts.parse::<i64>().ok().and_then(|millis| {
+                                    chrono::DateTime::from_timestamp_millis(millis)
+                                        .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+                                })
+                            });
+
+                            // Read tags from .content file with matching UUID
+                            let mut tags = Vec::new();
+                            if let Some(ref uuid_str) = uuid {
+                                let content_path = notebooks_dir.join(format!("{}.content", uuid_str));
+                                if content_path.exists() {
+                                    if let Ok(content) = std::fs::read_to_string(&content_path) {
+                                        if let Ok(content_data) = serde_json::from_str::<ContentFile>(&content) {
+                                            if !content_data.tags.is_empty() {
+                                                tags = content_data.tags
+                                                    .iter()
+                                                    .map(|tag| tag.name.clone())
+                                                    .collect();
+                                                debug!("Found {} tags for {}: {:?}", tags.len(), notebook_name, tags);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            return Ok((created_time, modified_time, tags, is_deleted));
+                        }
+                    }
+                }
+            }
+        }
+
+        debug!("No metadata found for {}", notebook_name);
+        Ok((None, None, Vec::new(), false))
     }
 
     fn read_tags_from_content(&self, notebook_name: &str) -> Result<Vec<String>> {
