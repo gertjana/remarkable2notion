@@ -265,59 +265,7 @@ impl RemarkableClient {
         Ok((None, None, Vec::new(), false))
     }
 
-    fn read_tags_from_content(&self, notebook_name: &str) -> Result<Vec<String>> {
-        // The .content and .metadata files are in the Notebooks directory
-        // They're named with UUIDs, so we need to:
-        // 1. Find the .metadata file with matching visibleName
-        // 2. Use the same UUID to read the .content file
-        let notebooks_dir = self.backup_dir.join("Notebooks");
 
-        debug!("Looking for tags for notebook: {}", notebook_name);
-
-        // First pass: find the UUID by matching notebook name in .metadata files
-        let mut uuid = None;
-        for entry in std::fs::read_dir(&notebooks_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-
-            if path.extension().and_then(|s| s.to_str()) == Some("metadata") {
-                if let Ok(metadata_content) = std::fs::read_to_string(&path) {
-                    if let Ok(metadata) = serde_json::from_str::<MetadataFile>(&metadata_content) {
-                        if metadata.visible_name == notebook_name {
-                            // Extract UUID from filename (remove .metadata extension)
-                            uuid = path.file_stem()
-                                .and_then(|s| s.to_str())
-                                .map(|s| s.to_string());
-                            debug!("Found UUID {} for notebook {}", uuid.as_ref().unwrap(), notebook_name);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Second pass: read tags from .content file with matching UUID
-        if let Some(uuid) = uuid {
-            let content_path = notebooks_dir.join(format!("{}.content", uuid));
-            if content_path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&content_path) {
-                    if let Ok(content_data) = serde_json::from_str::<ContentFile>(&content) {
-                        if !content_data.tags.is_empty() {
-                            let tag_names: Vec<String> = content_data.tags
-                                .iter()
-                                .map(|tag| tag.name.clone())
-                                .collect();
-                            debug!("Found {} tags for {}: {:?}", tag_names.len(), notebook_name, tag_names);
-                            return Ok(tag_names);
-                        }
-                    }
-                }
-            }
-        }
-
-        debug!("No tags found for {}", notebook_name);
-        Ok(Vec::new())
-    }
 
     pub async fn download_notebook(&self, notebook: &Notebook, output_dir: &Path) -> Result<PathBuf> {
         debug!("Copying notebook PDF: {}", notebook.name);
