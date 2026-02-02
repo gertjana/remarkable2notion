@@ -263,17 +263,19 @@ impl NotionClient {
         }
 
         // Add folder if available (empty string for root level)
-        if !metadata.folder_path.is_empty() {
-            properties["Folder"] = json!({
-                "rich_text": [
-                    {
+        properties["Folder"] = json!({
+            "rich_text": if metadata.folder_path.is_empty() {
+                vec![]
+            } else {
+                vec![
+                    json!({
                         "text": {
                             "content": metadata.folder_path
                         }
-                    }
+                    })
                 ]
-            });
-        }
+            }
+        });
 
         let create_body = json!({
             "parent": {
