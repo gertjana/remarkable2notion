@@ -133,16 +133,43 @@ impl SyncEngine {
                         debug!(
                             "No Notion page found for deleted notebook '{}', skipping delete",
                             notebook.name
-                        );
+
+        // Fetch all pages from Notion using a paginated API to ensure we see
+        // pages beyond the first page of results.
+        let all_pages = match self.notion.get_all_pages().await {
+            Ok(pages) => pages,
+            Err(e) => {
+                warn!(
+                    "Failed to list pages from Notion for delete-sync: {}. Skipping delete step.",
+                    e
+                );
+                Vec::new()
+            }
+        };
+
+        for notebook in &notebooks {
+            if notebook.is_deleted {
+                debug!(
+                    "Notebook '{}' is in trash, attempting to delete from Notion",
+                    notebook.name
+                );
+
+                // Find the corresponding page by title among all pages.
+                if let Some(page) = all_pages
+                    .iter()
+                    .find(|page| page.title == notebook.name)
+                {
+                    if let Err(e) = self.notion.delete_page(&page.id).await {
+                        warn!("Failed to delete '{}': {}", notebook.name, e);
+                    } else {
+                        deleted_count += 1;
+                        info!("🗑️  {}", notebook.name);
                     }
-                    Err(e) => {
-                        error_count += 1;
-                        warn!(
-                            "Failed to look up Notion page for deleted notebook '{}': {}",
-                            notebook.name,
-                            e
-                        );
-                    }
+                } else {
+                    debug!(
+                        "No Notion page found with title '{}' for deletion",
+                        notebook.name
+                    );
                 }
             }
         }
