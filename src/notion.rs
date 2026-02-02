@@ -263,17 +263,19 @@ impl NotionClient {
         }
 
         // Add folder if available (empty string for root level)
-        if !metadata.folder_path.is_empty() {
-            properties["Folder"] = json!({
-                "rich_text": [
-                    {
+        properties["Folder"] = json!({
+            "rich_text": if metadata.folder_path.is_empty() {
+                vec![]
+            } else {
+                vec![
+                    json!({
                         "text": {
                             "content": metadata.folder_path
                         }
-                    }
+                    })
                 ]
-            });
-        }
+            }
+        });
 
         let create_body = json!({
             "parent": {
@@ -402,13 +404,25 @@ impl NotionClient {
             "properties": properties
         });
 
-        self.client
+        let response = self
+            .client
             .patch(format!("{}/pages/{}", NOTION_API_BASE, page_id))
             .headers(self.headers())
             .json(&update_props)
             .send()
             .await?;
 
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "<failed to read response body>".to_string());
+            return Err(Error::Other(format!(
+                "Failed to update Notion page properties (HTTP {}): {}",
+                status, body
+            )));
+        }
         let children_response = self
             .client
             .get(format!("{}/blocks/{}/children", NOTION_API_BASE, page_id))
