@@ -133,6 +133,14 @@ impl SyncEngine {
                         debug!(
                             "No Notion page found for deleted notebook '{}', skipping delete",
                             notebook.name
+                        );
+                    }
+                    Err(e) => {
+                        warn!("Failed to check if page exists for deleted notebook '{}': {}", notebook.name, e);
+                    }
+                }
+            }
+        }
 
         // Fetch all pages from Notion using a paginated API to ensure we see
         // pages beyond the first page of results.
