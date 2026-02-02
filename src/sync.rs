@@ -120,12 +120,28 @@ impl SyncEngine {
         for notebook in &notebooks {
             if notebook.is_deleted {
                 debug!("Notebook '{}' is in trash, deleting from Notion", notebook.name);
-                if let Ok(Some(page)) = self.notion.find_page_by_title(&notebook.name).await {
-                    if let Err(e) = self.notion.delete_page(&page.id).await {
-                        warn!("Failed to delete '{}': {}", notebook.name, e);
-                    } else {
-                        deleted_count += 1;
-                        info!("🗑️  {}", notebook.name);
+                match self.notion.find_page_by_title(&notebook.name).await {
+                    Ok(Some(page)) => {
+                        if let Err(e) = self.notion.delete_page(&page.id).await {
+                            warn!("Failed to delete '{}': {}", notebook.name, e);
+                        } else {
+                            deleted_count += 1;
+                            info!("🗑️  {}", notebook.name);
+                        }
+                    }
+                    Ok(None) => {
+                        debug!(
+                            "No Notion page found for deleted notebook '{}', skipping delete",
+                            notebook.name
+                        );
+                    }
+                    Err(e) => {
+                        error_count += 1;
+                        warn!(
+                            "Failed to look up Notion page for deleted notebook '{}': {}",
+                            notebook.name,
+                            e
+                        );
                     }
                 }
             }
