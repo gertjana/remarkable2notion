@@ -50,11 +50,16 @@ async fn main() {
 
             // Print ASCII art header
             const VERSION: &str = env!("CARGO_PKG_VERSION");
+            let version_line = format!("|_| |_|_|_|arkable |___|  |_|___|otion v{}", VERSION);
+            let dashes = "-".repeat(version_line.len());
+
+            eprintln!();
             eprintln!("     _____          ___    _____");
             eprintln!(" ___|     |        |_  |  |   | |");
             eprintln!("|  _| | | |        |  _|  | | | |");
-            eprintln!("|_|e|_|_|_|arkable |___|  |_|___|otion v{}", VERSION);
-            eprintln!("---------------------------------------------");
+            eprintln!("{}", version_line);
+            eprintln!("{}", dashes);
+            eprintln!();
 
             let notion_token = notion_token
                 .or_else(|| std::env::var("NOTION_TOKEN").ok())

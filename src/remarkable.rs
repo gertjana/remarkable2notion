@@ -96,9 +96,49 @@ impl RemarkableClient {
         Ok(())
     }
 
+    pub async fn check_connection(&self) -> Result<()> {
+        debug!("Checking tablet connection...");
+
+        // Quick SSH connection test with 3 second timeout
+        let output = Command::new("ssh")
+            .arg("-o")
+            .arg("ConnectTimeout=3")
+            .arg("-o")
+            .arg("StrictHostKeyChecking=no")
+            .arg("-o")
+            .arg("UserKnownHostsFile=/dev/null")
+            .arg("-o")
+            .arg("LogLevel=ERROR")
+            .arg("root@10.11.99.1")
+            .arg("echo ok")
+            .output();
+
+        match output {
+            Ok(result) => {
+                if result.status.success() {
+                    let stdout = String::from_utf8_lossy(&result.stdout);
+                    if stdout.trim() == "ok" {
+                        debug!("✓ Tablet is connected and responsive");
+                        return Ok(());
+                    }
+                }
+                Err(Error::Remarkable(
+                    "Tablet is not responding. Make sure it's connected via USB and not sleeping."
+                        .to_string(),
+                ))
+            }
+            Err(e) => Err(Error::Remarkable(format!(
+                "Failed to check tablet connection: {}. Is SSH available?",
+                e
+            ))),
+        }
+    }
+
     pub async fn list_notebooks(&self) -> Result<Vec<Notebook>> {
         info!("Syncing from reMarkable (USB)...");
-        debug!("⚠️  Make sure your ReMarkable tablet is connected via USB!");
+
+        // Quick connection check before attempting sync
+        self.check_connection().await?;
 
         // Run RemarkableSync to backup and convert
         let mut cmd = Command::new("RemarkableSync");
