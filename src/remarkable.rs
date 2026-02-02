@@ -105,15 +105,15 @@ impl RemarkableClient {
         cmd.arg("sync")
             .arg("--backup-dir")
             .arg(&self.backup_dir)
-            .arg("--skip-templates");  // Skip templates to avoid errors
+            .arg("--skip-templates"); // Skip templates to avoid errors
 
         if let Some(ref password) = self.password {
             cmd.arg("--password").arg(password);
         }
 
-        let output = cmd.output().map_err(|e| {
-            Error::Remarkable(format!("Failed to run RemarkableSync: {}", e))
-        })?;
+        let output = cmd
+            .output()
+            .map_err(|e| Error::Remarkable(format!("Failed to run RemarkableSync: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -143,14 +143,13 @@ impl RemarkableClient {
         debug!("Built metadata index with {} entries", metadata_index.len());
 
         let mut notebooks = Vec::new();
-        self.scan_pdfs_recursive(&pdfs_dir, "", &mut notebooks, &metadata_index)?;
+        Self::scan_pdfs_recursive(&pdfs_dir, "", &mut notebooks, &metadata_index)?;
 
         debug!("Found {} notebooks", notebooks.len());
         Ok(notebooks)
     }
 
     fn scan_pdfs_recursive(
-        &self,
         dir: &Path,
         relative_path: &str,
         notebooks: &mut Vec<Notebook>,
@@ -167,13 +166,9 @@ impl RemarkableClient {
                 } else {
                     format!("{}/{}", relative_path, folder_name)
                 };
-                self.scan_pdfs_recursive(&path, &new_path, notebooks, metadata_index)?;
+                Self::scan_pdfs_recursive(&path, &new_path, notebooks, metadata_index)?;
             } else if path.extension().and_then(|s| s.to_str()) == Some("pdf") {
-                let name = path
-                    .file_stem()
-                    .unwrap()
-                    .to_string_lossy()
-                    .to_string();
+                let name = path.file_stem().unwrap().to_string_lossy().to_string();
 
                 let full_name = if relative_path.is_empty() {
                     name.clone()
@@ -182,9 +177,14 @@ impl RemarkableClient {
                 };
 
                 // O(1) lookup from pre-built index
-                let (created_time, modified_time, tags, is_deleted) = 
+                let (created_time, modified_time, tags, is_deleted) =
                     if let Some(meta) = metadata_index.get(&name) {
-                        (meta.created_time.clone(), meta.modified_time.clone(), meta.tags.clone(), meta.is_deleted)
+                        (
+                            meta.created_time.clone(),
+                            meta.modified_time.clone(),
+                            meta.tags.clone(),
+                            meta.is_deleted,
+                        )
                     } else {
                         debug!("No metadata found for {}", name);
                         (None, None, Vec::new(), false)
@@ -229,10 +229,15 @@ impl RemarkableClient {
                 if let Ok(metadata_content) = std::fs::read_to_string(&path) {
                     if let Ok(metadata) = serde_json::from_str::<MetadataFile>(&metadata_content) {
                         // Check if notebook is in trash
-                        let is_deleted = metadata.parent.as_ref().map(|p| p == "trash").unwrap_or(false);
+                        let is_deleted = metadata
+                            .parent
+                            .as_ref()
+                            .map(|p| p == "trash")
+                            .unwrap_or(false);
 
                         // Extract UUID from filename (remove .metadata extension)
-                        let uuid = path.file_stem()
+                        let uuid = path
+                            .file_stem()
                             .and_then(|s| s.to_str())
                             .map(|s| s.to_string());
 
@@ -257,8 +262,11 @@ impl RemarkableClient {
                             let content_path = notebooks_dir.join(format!("{}.content", uuid_str));
                             if content_path.exists() {
                                 if let Ok(content) = std::fs::read_to_string(&content_path) {
-                                    if let Ok(content_data) = serde_json::from_str::<ContentFile>(&content) {
-                                        tags = content_data.tags
+                                    if let Ok(content_data) =
+                                        serde_json::from_str::<ContentFile>(&content)
+                                    {
+                                        tags = content_data
+                                            .tags
                                             .iter()
                                             .map(|tag| tag.name.clone())
                                             .collect();
@@ -275,7 +283,7 @@ impl RemarkableClient {
                                 modified_time,
                                 tags,
                                 is_deleted,
-                            }
+                            },
                         );
                     }
                 }
@@ -286,11 +294,18 @@ impl RemarkableClient {
         Ok(index)
     }
 
-    pub async fn download_notebook(&self, notebook: &Notebook, output_dir: &Path) -> Result<PathBuf> {
+    pub async fn download_notebook(
+        &self,
+        notebook: &Notebook,
+        output_dir: &Path,
+    ) -> Result<PathBuf> {
         debug!("Copying notebook PDF: {}", notebook.name);
 
         // The PDF is already in the backup directory (capital PDF), just copy it
-        let source_path = self.backup_dir.join("PDF").join(format!("{}.pdf", notebook.path));
+        let source_path = self
+            .backup_dir
+            .join("PDF")
+            .join(format!("{}.pdf", notebook.path));
 
         if !source_path.exists() {
             return Err(Error::Remarkable(format!(

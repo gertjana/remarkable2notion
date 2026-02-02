@@ -2,7 +2,7 @@ use crate::error::{Error, Result};
 use reqwest::Client;
 use serde_json::json;
 use std::path::{Path, PathBuf};
-use tracing::{warn, debug};
+use tracing::{debug, warn};
 
 pub struct GoogleVisionClient {
     client: Client,
@@ -18,7 +18,10 @@ impl GoogleVisionClient {
     }
 
     /// Extract text AND keep images from PDF (for uploading to Notion)
-    pub async fn extract_text_and_images_from_pdf(&self, pdf_path: &Path) -> Result<(String, Vec<PathBuf>)> {
+    pub async fn extract_text_and_images_from_pdf(
+        &self,
+        pdf_path: &Path,
+    ) -> Result<(String, Vec<PathBuf>)> {
         debug!("Extracting text using Google Cloud Vision: {:?}", pdf_path);
 
         // First, extract images from PDF using pdftoppm
@@ -28,7 +31,10 @@ impl GoogleVisionClient {
             return Ok(("(No pages found in PDF)".to_string(), Vec::new()));
         }
 
-        debug!("Processing {} pages with Google Cloud Vision", page_images.len());
+        debug!(
+            "Processing {} pages with Google Cloud Vision",
+            page_images.len()
+        );
 
         let mut full_text = String::new();
 
@@ -55,7 +61,10 @@ impl GoogleVisionClient {
             warn!("No text extracted from PDF");
             full_text = "(No text detected)".to_string();
         } else {
-            debug!("Extracted {} characters using Google Cloud Vision", full_text.len());
+            debug!(
+                "Extracted {} characters using Google Cloud Vision",
+                full_text.len()
+            );
         }
 
         Ok((full_text, page_images))
@@ -65,7 +74,8 @@ impl GoogleVisionClient {
     async fn extract_text_from_image(&self, image_path: &Path) -> Result<String> {
         // Read image and encode to base64
         let image_bytes = tokio::fs::read(image_path).await?;
-        let image_base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &image_bytes);
+        let image_base64 =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &image_bytes);
 
         // Call Vision API for image annotation
         let request_body = json!({
@@ -84,12 +94,7 @@ impl GoogleVisionClient {
             self.api_key
         );
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&request_body)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&request_body).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();

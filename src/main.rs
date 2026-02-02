@@ -12,10 +12,10 @@ mod test;
 use clap::Parser;
 use cli::{Cli, Commands};
 use config::Config;
+use std::path::{Path, PathBuf};
 use sync::SyncEngine;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
-use std::path::{Path, PathBuf};
 
 #[tokio::main]
 async fn main() {
@@ -42,15 +42,19 @@ async fn main() {
                     "error" => Some(Level::ERROR),
                     _ => None,
                 })
-                .unwrap_or_else(|| if verbose { Level::DEBUG } else { Level::INFO });
+                .unwrap_or(if verbose { Level::DEBUG } else { Level::INFO });
 
             let subscriber = FmtSubscriber::builder().with_max_level(level).finish();
             tracing::subscriber::set_global_default(subscriber)
                 .expect("Failed to set tracing subscriber");
 
-            // Print header
+            // Print ASCII art header
             const VERSION: &str = env!("CARGO_PKG_VERSION");
-            eprintln!("remarkable2notion v{}", VERSION);
+            eprintln!();
+            eprintln!("     _____          ___    _____");
+            eprintln!(" ___|     |        |_  |  |   | |");
+            eprintln!("|  _| | | |        |  _|  | | | |");
+            eprintln!("|_| |_|_|_|arkable |___|  |_|___|otion v{}", VERSION);
             eprintln!();
 
             let notion_token = notion_token

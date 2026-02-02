@@ -31,7 +31,8 @@ impl SyncEngine {
             GoogleVisionClient::new(api_key.clone())
         } else {
             return Err(Error::Config(
-                "Google Cloud Vision API key is required. Set GOOGLE_VISION_API_KEY in .env file.".to_string()
+                "Google Cloud Vision API key is required. Set GOOGLE_VISION_API_KEY in .env file."
+                    .to_string(),
             ));
         };
 
@@ -45,10 +46,7 @@ impl SyncEngine {
                 client_id.clone(),
                 client_secret.clone(),
             )?);
-            Some(GoogleDriveClient::new(
-                oauth_client,
-                config.google_drive_folder_id.clone(),
-            ).await?)
+            Some(GoogleDriveClient::new(oauth_client, config.google_drive_folder_id.clone()).await?)
         } else {
             warn!("Google Drive not configured - PDFs will be linked locally");
             None
@@ -101,7 +99,12 @@ impl SyncEngine {
                 continue;
             }
 
-            debug!("Processing {}/{}: {}", idx + 1, notebooks.len(), notebook.name);
+            debug!(
+                "Processing {}/{}: {}",
+                idx + 1,
+                notebooks.len(),
+                notebook.name
+            );
 
             match self.process_notebook(notebook).await {
                 Ok(_) => {
@@ -119,7 +122,10 @@ impl SyncEngine {
         let mut deleted_count = 0;
         for notebook in &notebooks {
             if notebook.is_deleted {
-                debug!("Notebook '{}' is in trash, deleting from Notion", notebook.name);
+                debug!(
+                    "Notebook '{}' is in trash, deleting from Notion",
+                    notebook.name
+                );
                 match self.notion.find_page_by_title(&notebook.name).await {
                     Ok(Some(page)) => {
                         if let Err(e) = self.notion.delete_page(&page.id).await {
@@ -136,7 +142,10 @@ impl SyncEngine {
                         );
                     }
                     Err(e) => {
-                        warn!("Failed to check if page exists for deleted notebook '{}': {}", notebook.name, e);
+                        warn!(
+                            "Failed to check if page exists for deleted notebook '{}': {}",
+                            notebook.name, e
+                        );
                     }
                 }
             }
@@ -163,10 +172,7 @@ impl SyncEngine {
                 );
 
                 // Find the corresponding page by title among all pages.
-                if let Some(page) = all_pages
-                    .iter()
-                    .find(|page| page.title == notebook.name)
-                {
+                if let Some(page) = all_pages.iter().find(|page| page.title == notebook.name) {
                     if let Err(e) = self.notion.delete_page(&page.id).await {
                         warn!("Failed to delete '{}': {}", notebook.name, e);
                     } else {
@@ -202,7 +208,10 @@ impl SyncEngine {
             .await?;
 
         // Extract text and images using Google Cloud Vision
-        let (text_content, page_images) = self.google_vision.extract_text_and_images_from_pdf(&pdf_path).await?;
+        let (text_content, page_images) = self
+            .google_vision
+            .extract_text_and_images_from_pdf(&pdf_path)
+            .await?;
 
         // Prepare image paths for direct upload to Notion
         let image_paths: Vec<(usize, &Path)> = page_images
@@ -223,11 +232,15 @@ impl SyncEngine {
         match existing_page {
             Some(page) => {
                 debug!("Updating existing page: {}", notebook.name);
-                self.notion.update_page(&page.id, &text_content, &notebook.metadata, &notebook.tags).await?;
+                self.notion
+                    .update_page(&page.id, &text_content, &notebook.metadata, &notebook.tags)
+                    .await?;
 
                 // Add images if available (upload directly to Notion)
                 if !image_paths.is_empty() {
-                    self.notion.add_uploaded_images(&page.id, &image_paths).await?;
+                    self.notion
+                        .add_uploaded_images(&page.id, &image_paths)
+                        .await?;
                 }
 
                 // Set PDF URL (Google Drive link or local path)
@@ -240,11 +253,21 @@ impl SyncEngine {
             }
             None => {
                 debug!("Creating new page: {}", notebook.name);
-                let page = self.notion.create_page(&notebook.name, &text_content, &notebook.metadata, &notebook.tags).await?;
+                let page = self
+                    .notion
+                    .create_page(
+                        &notebook.name,
+                        &text_content,
+                        &notebook.metadata,
+                        &notebook.tags,
+                    )
+                    .await?;
 
                 // Add images if available (upload directly to Notion)
                 if !image_paths.is_empty() {
-                    self.notion.add_uploaded_images(&page.id, &image_paths).await?;
+                    self.notion
+                        .add_uploaded_images(&page.id, &image_paths)
+                        .await?;
                 }
 
                 // Set PDF URL (Google Drive link or local path)

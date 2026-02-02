@@ -35,6 +35,8 @@ struct PageResult {
 #[derive(Debug, Deserialize)]
 struct BlockResponse {
     results: Vec<serde_json::Value>,
+    has_more: bool,
+    next_cursor: Option<String>,
 }
 
 pub struct NotionClient {
@@ -69,7 +71,10 @@ impl NotionClient {
 
         let response = self
             .client
-            .get(format!("{}/databases/{}", NOTION_API_BASE, self.database_id))
+            .get(format!(
+                "{}/databases/{}",
+                NOTION_API_BASE, self.database_id
+            ))
             .headers(self.headers())
             .send()
             .await?;
@@ -114,7 +119,10 @@ impl NotionClient {
 
         let response = self
             .client
-            .patch(format!("{}/databases/{}", NOTION_API_BASE, self.database_id))
+            .patch(format!(
+                "{}/databases/{}",
+                NOTION_API_BASE, self.database_id
+            ))
             .headers(self.headers())
             .json(&update_body)
             .send()
@@ -123,7 +131,10 @@ impl NotionClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await?;
-            warn!("Failed to update database schema (may already exist): {} - {}", status, body);
+            warn!(
+                "Failed to update database schema (may already exist): {} - {}",
+                status, body
+            );
         } else {
             debug!("Database properties ensured");
         }
@@ -135,7 +146,10 @@ impl NotionClient {
         // Get database schema to find the title property
         let response = self
             .client
-            .get(format!("{}/databases/{}", NOTION_API_BASE, self.database_id))
+            .get(format!(
+                "{}/databases/{}",
+                NOTION_API_BASE, self.database_id
+            ))
             .headers(self.headers())
             .send()
             .await?;
@@ -157,7 +171,9 @@ impl NotionClient {
             }
         }
 
-        Err(Error::Notion("No title property found in database".to_string()))
+        Err(Error::Notion(
+            "No title property found in database".to_string(),
+        ))
     }
 
     pub async fn find_page_by_title(&self, title: &str) -> Result<Option<NotionPage>> {
@@ -195,9 +211,12 @@ impl NotionClient {
                 for (_key, value) in props.iter() {
                     if let Some(prop_type) = value.get("type") {
                         if prop_type == "title" {
-                            if let Some(title_array) = value.get("title").and_then(|t| t.as_array()) {
+                            if let Some(title_array) = value.get("title").and_then(|t| t.as_array())
+                            {
                                 if let Some(first_title) = title_array.first() {
-                                    if let Some(text_content) = first_title.get("plain_text").and_then(|t| t.as_str()) {
+                                    if let Some(text_content) =
+                                        first_title.get("plain_text").and_then(|t| t.as_str())
+                                    {
                                         if text_content == title {
                                             debug!("Found existing page with ID: {}", page.id);
                                             return Ok(Some(NotionPage {
@@ -218,7 +237,13 @@ impl NotionClient {
         Ok(None)
     }
 
-    pub async fn create_page(&self, title: &str, content: &str, metadata: &NotebookMetadata, tags: &[String]) -> Result<NotionPage> {
+    pub async fn create_page(
+        &self,
+        title: &str,
+        content: &str,
+        metadata: &NotebookMetadata,
+        tags: &[String],
+    ) -> Result<NotionPage> {
         debug!("Creating Notion page: {}", title);
 
         // Get the actual title property name
@@ -349,7 +374,13 @@ impl NotionClient {
         })
     }
 
-    pub async fn update_page(&self, page_id: &str, content: &str, metadata: &NotebookMetadata, tags: &[String]) -> Result<()> {
+    pub async fn update_page(
+        &self,
+        page_id: &str,
+        content: &str,
+        metadata: &NotebookMetadata,
+        tags: &[String],
+    ) -> Result<()> {
         debug!("Updating Notion page: {}", page_id);
 
         // Update properties (tags and folder)
@@ -372,13 +403,11 @@ impl NotionClient {
         let folder_rich_text = if metadata.folder_path.is_empty() {
             vec![]
         } else {
-            vec![
-                json!({
-                    "text": {
-                        "content": metadata.folder_path
-                    }
-                })
-            ]
+            vec![json!({
+                "text": {
+                    "content": metadata.folder_path
+                }
+            })]
         };
         properties["Folder"] = json!({
             "rich_text": folder_rich_text
@@ -421,29 +450,45 @@ impl NotionClient {
                 .text()
                 .await
                 .unwrap_or_else(|_| "<failed to read response body>".to_string());
-            return Err(Error::Other(format!(
+            return Err(Error::Notion(format!(
                 "Failed to update Notion page properties (HTTP {}): {}",
                 status, body
             )));
         }
-        let children_response = self
-            .client
-            .get(format!("{}/blocks/{}/children", NOTION_API_BASE, page_id))
-            .headers(self.headers())
-            .send()
-            .await?;
 
-        if children_response.status().is_success() {
-            let blocks: BlockResponse = children_response.json().await?;
+        // Delete all existing blocks (with pagination)
+        let mut has_more = true;
+        let mut cursor: Option<String> = None;
 
-            for block in blocks.results {
-                if let Some(block_id) = block["id"].as_str() {
-                    self.client
-                        .delete(format!("{}/blocks/{}", NOTION_API_BASE, block_id))
-                        .headers(self.headers())
-                        .send()
-                        .await?;
+        while has_more {
+            let mut url = format!(
+                "{}/blocks/{}/children?page_size=100",
+                NOTION_API_BASE, page_id
+            );
+            if let Some(ref c) = cursor {
+                url = format!("{}&start_cursor={}", url, c);
+            }
+
+            let children_response = self.client.get(&url).headers(self.headers()).send().await?;
+
+            if children_response.status().is_success() {
+                let blocks: BlockResponse = children_response.json().await?;
+
+                for block in blocks.results {
+                    if let Some(block_id) = block["id"].as_str() {
+                        // Delete the block (this will also delete its children)
+                        self.client
+                            .delete(format!("{}/blocks/{}", NOTION_API_BASE, block_id))
+                            .headers(self.headers())
+                            .send()
+                            .await?;
+                    }
                 }
+
+                has_more = blocks.has_more;
+                cursor = blocks.next_cursor;
+            } else {
+                has_more = false;
             }
         }
 
@@ -575,7 +620,10 @@ impl NotionClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await?;
-            debug!("Failed to set PDF link (property may not exist): {} - {}", status, body);
+            debug!(
+                "Failed to set PDF link (property may not exist): {} - {}",
+                status, body
+            );
         }
 
         Ok(())
@@ -612,12 +660,20 @@ impl NotionClient {
     }
 
     /// Upload images directly to Notion storage (not external URLs)
-    pub async fn add_uploaded_images(&self, page_id: &str, image_paths: &[(usize, &Path)]) -> Result<()> {
+    pub async fn add_uploaded_images(
+        &self,
+        page_id: &str,
+        image_paths: &[(usize, &Path)],
+    ) -> Result<()> {
         if image_paths.is_empty() {
             return Ok(());
         }
 
-        debug!("Uploading {} images to Notion: {}", image_paths.len(), page_id);
+        debug!(
+            "Uploading {} images to Notion: {}",
+            image_paths.len(),
+            page_id
+        );
 
         let mut children = Vec::new();
 
@@ -659,7 +715,7 @@ impl NotionClient {
 
         let response = self
             .client
-            .patch(&format!("{}/blocks/{}/children", NOTION_API_BASE, page_id))
+            .patch(format!("{}/blocks/{}/children", NOTION_API_BASE, page_id))
             .header("Notion-Version", NOTION_API_VERSION)
             .bearer_auth(&self.token)
             .json(&append_body)
@@ -669,10 +725,10 @@ impl NotionClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await?;
-            return Err(Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to add uploaded images: {} - {}", status, body),
-            )));
+            return Err(Error::Io(std::io::Error::other(format!(
+                "Failed to add uploaded images: {} - {}",
+                status, body
+            ))));
         }
 
         debug!("Added {} uploaded images to page", children.len());
@@ -697,8 +753,8 @@ impl NotionClient {
 
         let create_response = self
             .client
-            .post(&format!("{}/file_uploads", NOTION_API_BASE))
-            .header("Notion-Version", "2025-09-03")  // File upload API requires newer version
+            .post(format!("{}/file_uploads", NOTION_API_BASE))
+            .header("Notion-Version", "2025-09-03") // File upload API requires newer version
             .bearer_auth(&self.token)
             .json(&create_body)
             .send()
@@ -707,27 +763,21 @@ impl NotionClient {
         if !create_response.status().is_success() {
             let status = create_response.status();
             let body = create_response.text().await?;
-            return Err(Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to create file upload: {} - {}", status, body),
-            )));
+            return Err(Error::Io(std::io::Error::other(format!(
+                "Failed to create file upload: {} - {}",
+                status, body
+            ))));
         }
 
         let create_result: serde_json::Value = create_response.json().await?;
         let file_id = create_result["id"]
             .as_str()
-            .ok_or_else(|| Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No file ID in create response",
-            )))?
+            .ok_or_else(|| Error::Io(std::io::Error::other("No file ID in create response")))?
             .to_string();
 
         let upload_url = create_result["upload_url"]
             .as_str()
-            .ok_or_else(|| Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No upload_url in create response",
-            )))?;
+            .ok_or_else(|| Error::Io(std::io::Error::other("No upload_url in create response")))?;
 
         // Step 2: Upload file data
         debug!("Uploading file data to: {}", upload_url);
@@ -738,13 +788,12 @@ impl NotionClient {
             .file_name(filename.to_string())
             .mime_str("image/png")?;
 
-        let form = reqwest::multipart::Form::new()
-            .part("file", file_part);
+        let form = reqwest::multipart::Form::new().part("file", file_part);
 
         let upload_response = self
             .client
             .post(upload_url)
-            .header("Notion-Version", "2025-09-03")  // File upload API requires newer version
+            .header("Notion-Version", "2025-09-03") // File upload API requires newer version
             .bearer_auth(&self.token)
             .multipart(form)
             .send()
@@ -753,10 +802,10 @@ impl NotionClient {
         if !upload_response.status().is_success() {
             let status = upload_response.status();
             let body = upload_response.text().await?;
-            return Err(Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to upload file data: {} - {}", status, body),
-            )));
+            return Err(Error::Io(std::io::Error::other(format!(
+                "Failed to upload file data: {} - {}",
+                status, body
+            ))));
         }
 
         debug!("File uploaded successfully: {}", file_id);
@@ -794,13 +843,22 @@ impl NotionClient {
             if !response.status().is_success() {
                 let status = response.status();
                 let body = response.text().await?;
-                return Err(Error::Notion(format!("Query failed: {} - {}", status, body)));
+                return Err(Error::Notion(format!(
+                    "Query failed: {} - {}",
+                    status, body
+                )));
             }
 
             let query_result: serde_json::Value = response.json().await?;
 
-            has_more = query_result.get("has_more").and_then(|v| v.as_bool()).unwrap_or(false);
-            start_cursor = query_result.get("next_cursor").and_then(|v| v.as_str()).map(|s| s.to_string());
+            has_more = query_result
+                .get("has_more")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            start_cursor = query_result
+                .get("next_cursor")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
 
             if let Some(results) = query_result.get("results").and_then(|r| r.as_array()) {
                 for page in results {
@@ -810,9 +868,14 @@ impl NotionClient {
                             for (_key, value) in props.iter() {
                                 if let Some(prop_type) = value.get("type") {
                                     if prop_type == "title" {
-                                        if let Some(title_array) = value.get("title").and_then(|t| t.as_array()) {
+                                        if let Some(title_array) =
+                                            value.get("title").and_then(|t| t.as_array())
+                                        {
                                             if let Some(first_title) = title_array.first() {
-                                                if let Some(text_content) = first_title.get("plain_text").and_then(|t| t.as_str()) {
+                                                if let Some(text_content) = first_title
+                                                    .get("plain_text")
+                                                    .and_then(|t| t.as_str())
+                                                {
                                                     all_pages.push(NotionPage {
                                                         id: page_id.to_string(),
                                                         title: text_content.to_string(),
@@ -841,7 +904,8 @@ impl NotionClient {
             "archived": true
         });
 
-        let response = self.client
+        let response = self
+            .client
             .patch(format!("{}/pages/{}", NOTION_API_BASE, page_id))
             .headers(self.headers())
             .json(&update_props)
@@ -851,7 +915,10 @@ impl NotionClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await?;
-            return Err(Error::Notion(format!("Failed to delete page: {} - {}", status, body)));
+            return Err(Error::Notion(format!(
+                "Failed to delete page: {} - {}",
+                status, body
+            )));
         }
 
         debug!("Page deleted");

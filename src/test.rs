@@ -24,10 +24,9 @@ pub async fn test_remarkable(backup_dir: Option<PathBuf>, password: Option<Strin
 pub async fn test_ocr(pdf_path: &Path) -> Result<()> {
     info!("Testing Google Cloud Vision OCR...");
 
-    let api_key = std::env::var("GOOGLE_VISION_API_KEY")
-        .map_err(|_| crate::error::Error::Config(
-            "GOOGLE_VISION_API_KEY not set in environment".to_string()
-        ))?;
+    let api_key = std::env::var("GOOGLE_VISION_API_KEY").map_err(|_| {
+        crate::error::Error::Config("GOOGLE_VISION_API_KEY not set in environment".to_string())
+    })?;
 
     let vision = GoogleVisionClient::new(api_key);
     let (text, _images) = vision.extract_text_and_images_from_pdf(pdf_path).await?;

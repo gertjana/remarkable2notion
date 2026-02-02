@@ -1,13 +1,13 @@
 use crate::error::Result;
-use oauth2::{
-    basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
-    RedirectUrl, TokenUrl, TokenResponse, RefreshToken, Scope,
-};
 use oauth2::reqwest::async_http_client;
+use oauth2::{
+    basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, RedirectUrl,
+    RefreshToken, Scope, TokenResponse, TokenUrl,
+};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
@@ -37,16 +37,12 @@ impl GoogleOAuthClient {
         .set_redirect_uri(RedirectUrl::new(REDIRECT_URL.to_string())?);
 
         // Store token in same directory as credentials
-        let mut token_file = dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."));
+        let mut token_file = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
         token_file.push("remarkable2notion");
         fs::create_dir_all(&token_file)?;
         token_file.push("google_token.json");
 
-        Ok(Self {
-            client,
-            token_file,
-        })
+        Ok(Self { client, token_file })
     }
 
     /// Load token from file if it exists
@@ -106,8 +102,7 @@ impl GoogleOAuthClient {
 
         // Verify CSRF token
         if state != *csrf_token.secret() {
-            return Err(crate::error::Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(crate::error::Error::Io(std::io::Error::other(
                 "CSRF token mismatch",
             )));
         }
@@ -124,19 +119,14 @@ impl GoogleOAuthClient {
         let refresh_token = token_result
             .refresh_token()
             .ok_or_else(|| {
-                crate::error::Error::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "No refresh token received",
-                ))
+                crate::error::Error::Io(std::io::Error::other("No refresh token received"))
             })?
             .secret()
             .to_string();
 
         let expires_at = token_result
             .expires_in()
-            .map(|duration| {
-                chrono::Utc::now().timestamp() + duration.as_secs() as i64
-            });
+            .map(|duration| chrono::Utc::now().timestamp() + duration.as_secs() as i64);
 
         let stored_token = StoredToken {
             access_token,
@@ -172,9 +162,7 @@ impl GoogleOAuthClient {
 
         let expires_at = token_result
             .expires_in()
-            .map(|duration| {
-                chrono::Utc::now().timestamp() + duration.as_secs() as i64
-            });
+            .map(|duration| chrono::Utc::now().timestamp() + duration.as_secs() as i64);
 
         let stored_token = StoredToken {
             access_token,
@@ -213,20 +201,22 @@ impl GoogleOAuthClient {
 
     /// Start local HTTP server to receive OAuth callback
     fn receive_callback() -> Result<(String, String)> {
-        use tiny_http::{Server, Response};
+        use tiny_http::{Response, Server};
 
-        let server = Server::http("127.0.0.1:8085")
-            .map_err(|e| crate::error::Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to start callback server: {}", e),
-            )))?;
+        let server = Server::http("127.0.0.1:8085").map_err(|e| {
+            crate::error::Error::Io(std::io::Error::other(format!(
+                "Failed to start callback server: {}",
+                e
+            )))
+        })?;
 
         // Wait for exactly one request
-        let request = server.recv()
-            .map_err(|e| crate::error::Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to receive callback: {}", e),
-            )))?;
+        let request = server.recv().map_err(|e| {
+            crate::error::Error::Io(std::io::Error::other(format!(
+                "Failed to receive callback: {}",
+                e
+            )))
+        })?;
 
         let url = format!("http://localhost:8085{}", request.url());
         let parsed_url = url::Url::parse(&url)?;
@@ -235,30 +225,29 @@ impl GoogleOAuthClient {
             .query_pairs()
             .find(|(key, _)| key == "code")
             .map(|(_, value)| value.to_string())
-            .ok_or_else(|| crate::error::Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No authorization code in callback",
-            )))?;
+            .ok_or_else(|| {
+                crate::error::Error::Io(std::io::Error::other("No authorization code in callback"))
+            })?;
 
         let state = parsed_url
             .query_pairs()
             .find(|(key, _)| key == "state")
             .map(|(_, value)| value.to_string())
-            .ok_or_else(|| crate::error::Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No state in callback",
-            )))?;
+            .ok_or_else(|| {
+                crate::error::Error::Io(std::io::Error::other("No state in callback"))
+            })?;
 
         // Send success response to browser
         let response = Response::from_string(
             "<html><body><h1>✅ Authorization successful!</h1>\
-             <p>You can close this window and return to the terminal.</p></body></html>"
+             <p>You can close this window and return to the terminal.</p></body></html>",
         );
-        request.respond(response)
-            .map_err(|e| crate::error::Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to send response: {}", e),
-            )))?;
+        request.respond(response).map_err(|e| {
+            crate::error::Error::Io(std::io::Error::other(format!(
+                "Failed to send response: {}",
+                e
+            )))
+        })?;
 
         Ok((code, state))
     }

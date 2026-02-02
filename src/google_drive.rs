@@ -40,14 +40,16 @@ impl GoogleDriveClient {
         warn!("Google Drive token expired, attempting automatic refresh...");
 
         // Load current token to get refresh token
-        let stored_token = self.oauth_client.load_token()?
-            .ok_or_else(|| Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No stored token found",
-            )))?;
+        let stored_token = self
+            .oauth_client
+            .load_token()?
+            .ok_or_else(|| Error::Io(std::io::Error::other("No stored token found")))?;
 
         // Refresh using OAuth client
-        let new_token = self.oauth_client.refresh_token(&stored_token.refresh_token).await?;
+        let new_token = self
+            .oauth_client
+            .refresh_token(&stored_token.refresh_token)
+            .await?;
 
         // Update in-memory token
         *self.access_token.write().await = new_token.access_token;
@@ -58,12 +60,25 @@ impl GoogleDriveClient {
 
     pub async fn upload_pdf(&self, pdf_path: &Path, notebook_name: &str) -> Result<String> {
         debug!("Uploading PDF to Google Drive: {}", notebook_name);
-        self.upload_file(pdf_path, &format!("{}.pdf", notebook_name), "application/pdf").await
+        self.upload_file(
+            pdf_path,
+            &format!("{}.pdf", notebook_name),
+            "application/pdf",
+        )
+        .await
     }
 
-    async fn upload_file(&self, file_path: &Path, filename: &str, mime_type: &str) -> Result<String> {
+    async fn upload_file(
+        &self,
+        file_path: &Path,
+        filename: &str,
+        mime_type: &str,
+    ) -> Result<String> {
         // Try upload, retry once if token is expired
-        match self.upload_file_internal(file_path, filename, mime_type).await {
+        match self
+            .upload_file_internal(file_path, filename, mime_type)
+            .await
+        {
             Ok(url) => Ok(url),
             Err(e) => {
                 // Check if it's a 401 Unauthorized error
@@ -73,7 +88,8 @@ impl GoogleDriveClient {
 
                     // Retry the upload with new token
                     debug!("Retrying upload with refreshed token...");
-                    self.upload_file_internal(file_path, filename, mime_type).await
+                    self.upload_file_internal(file_path, filename, mime_type)
+                        .await
                 } else {
                     Err(e)
                 }
@@ -81,7 +97,12 @@ impl GoogleDriveClient {
         }
     }
 
-    async fn upload_file_internal(&self, file_path: &Path, filename: &str, mime_type: &str) -> Result<String> {
+    async fn upload_file_internal(
+        &self,
+        file_path: &Path,
+        filename: &str,
+        mime_type: &str,
+    ) -> Result<String> {
         let file_bytes = tokio::fs::read(file_path).await?;
 
         // Prepare metadata
@@ -95,8 +116,8 @@ impl GoogleDriveClient {
         }
 
         // Create multipart upload
-        let metadata_part = reqwest::multipart::Part::text(metadata.to_string())
-            .mime_str("application/json")?;
+        let metadata_part =
+            reqwest::multipart::Part::text(metadata.to_string()).mime_str("application/json")?;
 
         let file_part = reqwest::multipart::Part::bytes(file_bytes)
             .file_name(filename.to_string())
@@ -118,19 +139,16 @@ impl GoogleDriveClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await?;
-            return Err(Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Google Drive upload failed: {} - {}", status, body),
-            )));
+            return Err(Error::Io(std::io::Error::other(format!(
+                "Google Drive upload failed: {} - {}",
+                status, body
+            ))));
         }
 
         let result: serde_json::Value = response.json().await?;
-        let file_id = result["id"]
-            .as_str()
-            .ok_or_else(|| Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No file ID in Google Drive response",
-            )))?;
+        let file_id = result["id"].as_str().ok_or_else(|| {
+            Error::Io(std::io::Error::other("No file ID in Google Drive response"))
+        })?;
 
         debug!("File uploaded to Google Drive with ID: {}", file_id);
 
@@ -162,13 +180,16 @@ impl GoogleDriveClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await?;
-            return Err(Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to make file public: {} - {}", status, body),
-            )));
+            return Err(Error::Io(std::io::Error::other(format!(
+                "Failed to make file public: {} - {}",
+                status, body
+            ))));
         }
 
         // Return direct link to image (for embedding)
-        Ok(format!("https://drive.google.com/uc?export=view&id={}", file_id))
+        Ok(format!(
+            "https://drive.google.com/uc?export=view&id={}",
+            file_id
+        ))
     }
 }
