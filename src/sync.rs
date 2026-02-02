@@ -117,23 +117,7 @@ impl SyncEngine {
 
         // Delete notebooks from Notion that are deleted on the tablet (parent="trash")
         let mut deleted_count = 0;
-        for notebook in &notebooks {
-            if notebook.is_deleted {
-                debug!("Notebook '{}' is in trash, deleting from Notion", notebook.name);
-                match self.notion.find_page_by_title(&notebook.name).await {
-                    Ok(Some(page)) => {
-                        if let Err(e) = self.notion.delete_page(&page.id).await {
-                            warn!("Failed to delete '{}': {}", notebook.name, e);
-                        } else {
-                            deleted_count += 1;
-                            info!("🗑️  {}", notebook.name);
-                        }
-                    }
-                    Ok(None) => {
-                        debug!(
-                            "No Notion page found for deleted notebook '{}', skipping delete",
-                            notebook.name
-
+        
         // Fetch all pages from Notion using a paginated API to ensure we see
         // pages beyond the first page of results.
         let all_pages = match self.notion.get_all_pages().await {
