@@ -1,0 +1,33 @@
+# sbt build outputs
+target/
+project/target/
+project/project/
+
+# sbt build cache
+.bsp/
+
+# Bloop (build server)
+.bloop/
+
+# Metals (LSP server)
+.metals/
+metals.sbt
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# VS Code (Metals)
+.vscode/
+
+# Scala.js output
+*.js
+*.js.map
+
+# Generated resources / assembly jars
+*.jar
+
+# macOS
+.DS_Store

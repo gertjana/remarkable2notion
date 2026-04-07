@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>remarkable2notion</title>
+
+  <!-- Preconnect for font performance -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+  <link rel="stylesheet" href="/webapp/app.css" />
+
+  <!-- Google Identity Services -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <script>
+    window._googleClientId = "__GOOGLE_CLIENT_ID__";
+    window._devMode        = __DEV_MODE__;
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <script src="/webapp/remarkable-frontend-fastopt.js"></script>
+</body>
+</html>
